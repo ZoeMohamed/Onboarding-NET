@@ -1,6 +1,17 @@
 @TaskManagement.API_HostAddress = http://localhost:5161
 
-GET {{TaskManagement.API_HostAddress}}/api/health
+GET {{TaskManagement.API_HostAddress}}/api/tasks
 Accept: application/json
+
+###
+
+POST {{TaskManagement.API_HostAddress}}/api/tasks
+Content-Type: application/json
+
+{
+  "title": "Sample Task",
+  "description": "Created from .http file",
+  "priority": "High"
+}
 
 ###

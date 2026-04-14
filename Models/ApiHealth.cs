@@ -1,7 +1,0 @@
-namespace TaskManagement.API.Models;
-
-public class ApiHealth
-{
-    public string Status { get; set; } = string.Empty;
-    public string Message { get; set; } = string.Empty;
-}
