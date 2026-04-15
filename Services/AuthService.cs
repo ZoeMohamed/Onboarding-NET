@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using TaskManagement.API.Common.Exceptions;
 using TaskManagement.API.Data;
 using TaskManagement.API.DTOs;
+using TaskManagement.API.Models;
 
 namespace TaskManagement.API.Services;
 
@@ -18,6 +19,76 @@ public class AuthService : IAuthService
     {
         _context = context;
         _configuration = configuration;
+    }
+
+    public async Task<RegisterResponseDto> RegisterAsync(RegisterRequestDto dto)
+    {
+        var username = dto.Username.Trim();
+        var email = dto.Email.Trim();
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            errors.Add("Username is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            errors.Add("Email is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(dto.Password) || dto.Password.Length < 6)
+        {
+            errors.Add("Password must be at least 6 characters.");
+        }
+
+        if (!string.Equals(dto.Password, dto.ConfirmPassword, StringComparison.Ordinal))
+        {
+            errors.Add("ConfirmPassword must match Password.");
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new ValidationException("Registration validation failed.", errors);
+        }
+
+        var usernameExists = await _context.Users
+            .AnyAsync(u => u.Username.ToLower() == username.ToLower());
+
+        if (usernameExists)
+        {
+            throw new ValidationException("Registration failed.", new[] { "Username is already used." });
+        }
+
+        var emailExists = await _context.Users
+            .AnyAsync(u => u.Email.ToLower() == email.ToLower());
+
+        if (emailExists)
+        {
+            throw new ValidationException("Registration failed.", new[] { "Email is already used." });
+        }
+
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Username = username,
+            Email = email,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+            Role = "User",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Users.Add(user);
+        await _context.SaveChangesAsync();
+
+        return new RegisterResponseDto
+        {
+            UserId = user.Id,
+            Username = user.Username,
+            Email = user.Email,
+            Role = user.Role,
+            CreatedAt = user.CreatedAt
+        };
     }
 
     public async Task<AuthResponseDto> LoginAsync(LoginRequestDto dto)

@@ -3,6 +3,17 @@
 @adminToken = 
 @taskId = 
 
+### Register New User
+POST {{TaskManagement.API_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "newuser",
+  "email": "newuser@local.dev",
+  "password": "NewUser@123!",
+  "confirmPassword": "NewUser@123!"
+}
+
 ### Login User
 POST {{TaskManagement.API_HostAddress}}/api/auth/login
 Content-Type: application/json
