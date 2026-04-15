@@ -1,17 +1,54 @@
-@TaskManagement.API_HostAddress = http://localhost:5161
+@TaskManagement.API_HostAddress = https://localhost:7187
+@userToken = 
+@adminToken = 
+@taskId = 
 
-GET {{TaskManagement.API_HostAddress}}/api/tasks
-Accept: application/json
-
-###
-
-POST {{TaskManagement.API_HostAddress}}/api/tasks
+### Login User
+POST {{TaskManagement.API_HostAddress}}/api/auth/login
 Content-Type: application/json
 
 {
-  "title": "Sample Task",
-  "description": "Created from .http file",
+  "username": "user",
+  "password": "User@123!"
+}
+
+### Login Admin
+POST {{TaskManagement.API_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "Admin@123!"
+}
+
+### Get All Tasks (Auth required)
+GET {{TaskManagement.API_HostAddress}}/api/tasks
+Authorization: Bearer {{userToken}}
+
+### Create Task
+POST {{TaskManagement.API_HostAddress}}/api/tasks
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "title": "Sample Task from HTTP file",
+  "description": "Day 3 and 4 flow",
   "priority": "High"
 }
 
-###
+### Start Task
+PATCH {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}/start
+Authorization: Bearer {{userToken}}
+
+### Complete Task
+PATCH {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}/complete
+Authorization: Bearer {{userToken}}
+
+### Approve Task (Admin)
+PATCH {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}/approve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "note": "Approved from api.http"
+}

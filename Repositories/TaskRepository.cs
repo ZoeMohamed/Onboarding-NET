@@ -18,6 +18,7 @@ public class TaskRepository : ITaskRepository
         return await _context.Tasks
             .Include(t => t.Creator)
             .Include(t => t.Assignee)
+            .OrderByDescending(t => t.CreatedAt)
             .ToListAsync();
     }
 
@@ -46,6 +47,7 @@ public class TaskRepository : ITaskRepository
         task.Title = updated.Title;
         task.Description = updated.Description;
         task.Priority = updated.Priority;
+        task.Status = updated.Status;
         task.AssignedTo = updated.AssignedTo;
         task.DueDate = updated.DueDate;
         task.UpdatedAt = DateTime.UtcNow;
@@ -62,5 +64,18 @@ public class TaskRepository : ITaskRepository
         _context.Tasks.Remove(task);
         await _context.SaveChangesAsync();
         return true;
+    }
+
+    public async Task<bool> UserExistsAsync(Guid userId)
+    {
+        return await _context.Users.AnyAsync(u => u.Id == userId);
+    }
+
+    public async Task<ApprovalLog> AddApprovalLogAsync(ApprovalLog log)
+    {
+        log.Id = Guid.NewGuid();
+        _context.ApprovalLogs.Add(log);
+        await _context.SaveChangesAsync();
+        return log;
     }
 }

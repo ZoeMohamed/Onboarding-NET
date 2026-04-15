@@ -9,4 +9,6 @@ public interface ITaskRepository
     Task<UserTask> CreateAsync(UserTask task);
     Task<UserTask?> UpdateAsync(Guid id, UserTask task);
     Task<bool> DeleteAsync(Guid id);
+    Task<bool> UserExistsAsync(Guid userId);
+    Task<ApprovalLog> AddApprovalLogAsync(ApprovalLog log);
 }
