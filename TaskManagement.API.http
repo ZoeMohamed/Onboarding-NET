@@ -1,6 +1,7 @@
 @TaskManagement.API_HostAddress = https://localhost:7187
 @userToken = 
 @adminToken = 
+@managerToken = 
 @taskId = 
 
 ### Register New User
@@ -14,7 +15,7 @@ Content-Type: application/json
   "confirmPassword": "NewUser@123!"
 }
 
-### Login User
+### Login Seed User
 POST {{TaskManagement.API_HostAddress}}/api/auth/login
 Content-Type: application/json
 
@@ -23,13 +24,22 @@ Content-Type: application/json
   "password": "User@123!"
 }
 
-### Login Admin
+### Login Seed Admin
 POST {{TaskManagement.API_HostAddress}}/api/auth/login
 Content-Type: application/json
 
 {
   "username": "admin",
   "password": "Admin@123!"
+}
+
+### Login Seed Manager
+POST {{TaskManagement.API_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "manager",
+  "password": "Manager@123!"
 }
 
 ### Get All Tasks (Auth required)
@@ -43,8 +53,22 @@ Content-Type: application/json
 
 {
   "title": "Sample Task from HTTP file",
-  "description": "Day 3 and 4 flow",
+  "description": "Day 6-7 flow",
   "priority": "High"
+}
+
+### Get Task By Id
+GET {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}
+Authorization: Bearer {{userToken}}
+
+### Update Task
+PUT {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "title": "Sample Task Updated",
+  "priority": "Medium"
 }
 
 ### Start Task
@@ -55,7 +79,7 @@ Authorization: Bearer {{userToken}}
 PATCH {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}/complete
 Authorization: Bearer {{userToken}}
 
-### Approve Task (Admin)
+### Approve Task (Admin or Manager)
 PATCH {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}/approve
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
@@ -63,3 +87,20 @@ Content-Type: application/json
 {
   "note": "Approved from api.http"
 }
+
+### Reject Task (Admin or Manager)
+PATCH {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}/reject
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{
+  "note": "Rejected from api.http"
+}
+
+### Get Approval Logs
+GET {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}/approvals
+Authorization: Bearer {{userToken}}
+
+### Delete Task
+DELETE {{TaskManagement.API_HostAddress}}/api/tasks/{{taskId}}
+Authorization: Bearer {{userToken}}

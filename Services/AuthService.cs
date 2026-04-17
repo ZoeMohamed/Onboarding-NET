@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using TaskManagement.API.Common.Constants;
 using TaskManagement.API.Common.Exceptions;
 using TaskManagement.API.Data;
 using TaskManagement.API.DTOs;
@@ -14,49 +15,28 @@ public class AuthService : IAuthService
 {
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<AuthService> _logger;
 
-    public AuthService(AppDbContext context, IConfiguration configuration)
+    public AuthService(AppDbContext context, IConfiguration configuration, ILogger<AuthService> logger)
     {
         _context = context;
         _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task<RegisterResponseDto> RegisterAsync(RegisterRequestDto dto)
     {
         var username = dto.Username.Trim();
         var email = dto.Email.Trim();
-        var errors = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            errors.Add("Username is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            errors.Add("Email is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(dto.Password) || dto.Password.Length < 6)
-        {
-            errors.Add("Password must be at least 6 characters.");
-        }
-
-        if (!string.Equals(dto.Password, dto.ConfirmPassword, StringComparison.Ordinal))
-        {
-            errors.Add("ConfirmPassword must match Password.");
-        }
-
-        if (errors.Count > 0)
-        {
-            throw new ValidationException("Registration validation failed.", errors);
-        }
+        ValidateRegistrationInput(dto, username, email);
 
         var usernameExists = await _context.Users
             .AnyAsync(u => u.Username.ToLower() == username.ToLower());
 
         if (usernameExists)
         {
+            _logger.LogWarning("Registration rejected because username already exists: {Username}", username);
             throw new ValidationException("Registration failed.", new[] { "Username is already used." });
         }
 
@@ -65,6 +45,7 @@ public class AuthService : IAuthService
 
         if (emailExists)
         {
+            _logger.LogWarning("Registration rejected because email already exists: {Email}", email);
             throw new ValidationException("Registration failed.", new[] { "Email is already used." });
         }
 
@@ -74,12 +55,14 @@ public class AuthService : IAuthService
             Username = username,
             Email = email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
-            Role = "User",
+            Role = UserRoles.User,
             CreatedAt = DateTime.UtcNow
         };
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
+
+        _logger.LogInformation("User registered successfully: {UserId} ({Username})", user.Id, user.Username);
 
         return new RegisterResponseDto
         {
@@ -100,6 +83,7 @@ public class AuthService : IAuthService
 
         if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
         {
+            _logger.LogWarning("Invalid login attempt for username: {Username}", username);
             throw new ValidationException("Invalid credentials", new[] { "Username or password is incorrect." });
         }
 
@@ -129,6 +113,8 @@ public class AuthService : IAuthService
             expires: expiresAt.UtcDateTime,
             signingCredentials: credentials);
 
+        _logger.LogInformation("User login successful: {UserId} ({Username})", user.Id, user.Username);
+
         return new AuthResponseDto
         {
             Token = new JwtSecurityTokenHandler().WriteToken(token),
@@ -137,5 +123,35 @@ public class AuthService : IAuthService
             Username = user.Username,
             Role = user.Role
         };
+    }
+
+    private static void ValidateRegistrationInput(RegisterRequestDto dto, string username, string email)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            errors.Add("Username is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            errors.Add("Email is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(dto.Password) || dto.Password.Length < 6)
+        {
+            errors.Add("Password must be at least 6 characters.");
+        }
+
+        if (!string.Equals(dto.Password, dto.ConfirmPassword, StringComparison.Ordinal))
+        {
+            errors.Add("ConfirmPassword must match Password.");
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new ValidationException("Registration validation failed.", errors);
+        }
     }
 }

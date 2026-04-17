@@ -1,3 +1,4 @@
+using TaskManagement.API.Common.Constants;
 using TaskManagement.API.Common.Exceptions;
 using TaskManagement.API.DTOs;
 using TaskManagement.API.Models;
@@ -7,16 +8,13 @@ namespace TaskManagement.API.Services;
 
 public class TaskService : ITaskService
 {
-    private static readonly HashSet<string> AllowedPriorities = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Low", "Medium", "High"
-    };
-
     private readonly ITaskRepository _repository;
+    private readonly ILogger<TaskService> _logger;
 
-    public TaskService(ITaskRepository repository)
+    public TaskService(ITaskRepository repository, ILogger<TaskService> logger)
     {
         _repository = repository;
+        _logger = logger;
     }
 
     public async Task<List<TaskResponseDto>> GetAllAsync()
@@ -27,13 +25,179 @@ public class TaskService : ITaskService
 
     public async Task<TaskResponseDto> GetByIdAsync(Guid id)
     {
-        var task = await _repository.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
+        var task = await GetTaskOrThrowAsync(id);
         return MapToDto(task);
     }
 
+    public async Task<List<ApprovalLogResponseDto>> GetApprovalLogsAsync(Guid taskId)
+    {
+        await GetTaskOrThrowAsync(taskId);
+
+        var logs = await _repository.GetApprovalLogsByTaskIdAsync(taskId);
+        return logs.Select(MapApprovalLogToDto).ToList();
+    }
+
     public async Task<TaskResponseDto> CreateAsync(CreateTaskDto dto, Guid userId)
+    {
+        ValidateCreateInput(dto);
+
+        await EnsureUserExistsAsync(userId, "Creator user was not found.");
+
+        if (dto.AssignedTo.HasValue)
+        {
+            await EnsureUserExistsAsync(dto.AssignedTo.Value, "Assigned user was not found.");
+        }
+
+        var task = new UserTask
+        {
+            Title = dto.Title.Trim(),
+            Description = dto.Description?.Trim(),
+            Priority = NormalizePriority(dto.Priority),
+            AssignedTo = dto.AssignedTo,
+            DueDate = dto.DueDate,
+            CreatedBy = userId,
+            Status = TaskStatuses.Pending
+        };
+
+        var created = await _repository.CreateAsync(task);
+        _logger.LogInformation("Task created: {TaskId} by user {UserId}", created.Id, userId);
+
+        return MapToDto(created);
+    }
+
+    public async Task<TaskResponseDto> UpdateAsync(Guid id, UpdateTaskDto dto)
+    {
+        var existing = await GetTaskOrThrowAsync(id);
+        ValidateUpdateInput(dto);
+
+        if (dto.AssignedTo.HasValue)
+        {
+            await EnsureUserExistsAsync(dto.AssignedTo.Value, "Assigned user was not found.");
+            existing.AssignedTo = dto.AssignedTo;
+        }
+
+        existing.Title = dto.Title?.Trim() ?? existing.Title;
+        existing.Description = dto.Description?.Trim() ?? existing.Description;
+        existing.Priority = dto.Priority is null ? existing.Priority : NormalizePriority(dto.Priority);
+        existing.DueDate = dto.DueDate ?? existing.DueDate;
+
+        var updated = await _repository.UpdateAsync(id, existing)
+            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
+
+        _logger.LogInformation("Task updated: {TaskId}", id);
+        return MapToDto(updated);
+    }
+
+    public async Task DeleteAsync(Guid id)
+    {
+        var deleted = await _repository.DeleteAsync(id);
+        if (!deleted)
+        {
+            throw new NotFoundException($"Task with id '{id}' was not found.");
+        }
+
+        _logger.LogInformation("Task deleted: {TaskId}", id);
+    }
+
+    public async Task<TaskResponseDto> StartAsync(Guid id, Guid userId)
+    {
+        var task = await GetTaskOrThrowAsync(id);
+        EnsureTaskActor(task, userId);
+        EnsureStatus(task, TaskStatuses.Pending, "Only tasks with status 'Pending' can be started.");
+
+        task.Status = TaskStatuses.InProgress;
+        var updated = await _repository.UpdateAsync(id, task)
+            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
+
+        _logger.LogInformation("Task started: {TaskId} by user {UserId}", id, userId);
+        return MapToDto(updated);
+    }
+
+    public async Task<TaskResponseDto> CompleteAsync(Guid id, Guid userId)
+    {
+        var task = await GetTaskOrThrowAsync(id);
+        EnsureTaskActor(task, userId);
+        EnsureStatus(task, TaskStatuses.InProgress, "Only tasks with status 'InProgress' can be completed.");
+
+        task.Status = TaskStatuses.Completed;
+        var updated = await _repository.UpdateAsync(id, task)
+            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
+
+        _logger.LogInformation("Task completed: {TaskId} by user {UserId}", id, userId);
+        return MapToDto(updated);
+    }
+
+    public async Task<TaskResponseDto> ApproveAsync(Guid id, Guid reviewerId, string? note)
+    {
+        var task = await GetTaskOrThrowAsync(id);
+
+        if (task.CreatedBy == reviewerId)
+        {
+            throw new BusinessRuleException("Creator cannot approve their own task.");
+        }
+
+        EnsureStatus(task, TaskStatuses.Completed, "Only tasks with status 'Completed' can be approved.");
+        task.Status = TaskStatuses.Approved;
+
+        await _repository.AddApprovalLogAsync(new ApprovalLog
+        {
+            TaskId = task.Id,
+            ReviewedBy = reviewerId,
+            Action = ApprovalActions.Approved,
+            Note = note?.Trim(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        var updated = await _repository.UpdateAsync(id, task)
+            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
+
+        _logger.LogInformation("Task approved: {TaskId} by reviewer {ReviewerId}", id, reviewerId);
+        return MapToDto(updated);
+    }
+
+    public async Task<TaskResponseDto> RejectAsync(Guid id, Guid reviewerId, string? note)
+    {
+        var task = await GetTaskOrThrowAsync(id);
+
+        if (task.CreatedBy == reviewerId)
+        {
+            throw new BusinessRuleException("Creator cannot reject their own task.");
+        }
+
+        EnsureStatus(task, TaskStatuses.Completed, "Only tasks with status 'Completed' can be rejected.");
+        task.Status = TaskStatuses.Rejected;
+
+        await _repository.AddApprovalLogAsync(new ApprovalLog
+        {
+            TaskId = task.Id,
+            ReviewedBy = reviewerId,
+            Action = ApprovalActions.Rejected,
+            Note = note?.Trim(),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        var updated = await _repository.UpdateAsync(id, task)
+            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
+
+        _logger.LogInformation("Task rejected: {TaskId} by reviewer {ReviewerId}", id, reviewerId);
+        return MapToDto(updated);
+    }
+
+    private async Task<UserTask> GetTaskOrThrowAsync(Guid taskId)
+    {
+        return await _repository.GetByIdAsync(taskId)
+            ?? throw new NotFoundException($"Task with id '{taskId}' was not found.");
+    }
+
+    private async Task EnsureUserExistsAsync(Guid userId, string errorMessage)
+    {
+        if (!await _repository.UserExistsAsync(userId))
+        {
+            throw new ValidationException(errorMessage);
+        }
+    }
+
+    private static void ValidateCreateInput(CreateTaskDto dto)
     {
         var errors = new List<string>();
 
@@ -56,34 +220,10 @@ public class TaskService : ITaskService
         {
             throw new ValidationException("Task creation validation failed.", errors);
         }
-
-        await EnsureUserExistsAsync(userId, "Creator user was not found.");
-
-        if (dto.AssignedTo.HasValue)
-        {
-            await EnsureUserExistsAsync(dto.AssignedTo.Value, "Assigned user was not found.");
-        }
-
-        var task = new UserTask
-        {
-            Title = dto.Title.Trim(),
-            Description = dto.Description?.Trim(),
-            Priority = NormalizePriority(dto.Priority),
-            AssignedTo = dto.AssignedTo,
-            DueDate = dto.DueDate,
-            CreatedBy = userId,
-            Status = "Pending"
-        };
-
-        var created = await _repository.CreateAsync(task);
-        return MapToDto(created);
     }
 
-    public async Task<TaskResponseDto> UpdateAsync(Guid id, UpdateTaskDto dto)
+    private static void ValidateUpdateInput(UpdateTaskDto dto)
     {
-        var existing = await _repository.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
         var errors = new List<string>();
 
         if (dto.Title is not null && string.IsNullOrWhiteSpace(dto.Title))
@@ -105,155 +245,20 @@ public class TaskService : ITaskService
         {
             throw new ValidationException("Task update validation failed.", errors);
         }
-
-        if (dto.AssignedTo.HasValue)
-        {
-            await EnsureUserExistsAsync(dto.AssignedTo.Value, "Assigned user was not found.");
-            existing.AssignedTo = dto.AssignedTo;
-        }
-
-        existing.Title = dto.Title?.Trim() ?? existing.Title;
-        existing.Description = dto.Description?.Trim() ?? existing.Description;
-        existing.Priority = dto.Priority is null ? existing.Priority : NormalizePriority(dto.Priority);
-        existing.DueDate = dto.DueDate ?? existing.DueDate;
-
-        var updated = await _repository.UpdateAsync(id, existing)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        return MapToDto(updated);
-    }
-
-    public async Task DeleteAsync(Guid id)
-    {
-        var deleted = await _repository.DeleteAsync(id);
-        if (!deleted)
-        {
-            throw new NotFoundException($"Task with id '{id}' was not found.");
-        }
-    }
-
-    public async Task<TaskResponseDto> StartAsync(Guid id, Guid userId)
-    {
-        var task = await _repository.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        EnsureTaskActor(task, userId);
-
-        if (!task.Status.Equals("Pending", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new BusinessRuleException("Only tasks with status 'Pending' can be started.");
-        }
-
-        task.Status = "InProgress";
-        var updated = await _repository.UpdateAsync(id, task)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        return MapToDto(updated);
-    }
-
-    public async Task<TaskResponseDto> CompleteAsync(Guid id, Guid userId)
-    {
-        var task = await _repository.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        EnsureTaskActor(task, userId);
-
-        if (!task.Status.Equals("InProgress", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new BusinessRuleException("Only tasks with status 'InProgress' can be completed.");
-        }
-
-        task.Status = "Completed";
-        var updated = await _repository.UpdateAsync(id, task)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        return MapToDto(updated);
-    }
-
-    public async Task<TaskResponseDto> ApproveAsync(Guid id, Guid reviewerId, string? note)
-    {
-        var task = await _repository.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        if (task.CreatedBy == reviewerId)
-        {
-            throw new BusinessRuleException("Creator cannot approve their own task.");
-        }
-
-        if (!task.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new BusinessRuleException("Only tasks with status 'Completed' can be approved.");
-        }
-
-        task.Status = "Approved";
-
-        await _repository.AddApprovalLogAsync(new ApprovalLog
-        {
-            TaskId = task.Id,
-            ReviewedBy = reviewerId,
-            Action = "Approved",
-            Note = note?.Trim(),
-            CreatedAt = DateTime.UtcNow
-        });
-
-        var updated = await _repository.UpdateAsync(id, task)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        return MapToDto(updated);
-    }
-
-    public async Task<TaskResponseDto> RejectAsync(Guid id, Guid reviewerId, string? note)
-    {
-        var task = await _repository.GetByIdAsync(id)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        if (task.CreatedBy == reviewerId)
-        {
-            throw new BusinessRuleException("Creator cannot reject their own task.");
-        }
-
-        if (!task.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new BusinessRuleException("Only tasks with status 'Completed' can be rejected.");
-        }
-
-        task.Status = "Rejected";
-
-        await _repository.AddApprovalLogAsync(new ApprovalLog
-        {
-            TaskId = task.Id,
-            ReviewedBy = reviewerId,
-            Action = "Rejected",
-            Note = note?.Trim(),
-            CreatedAt = DateTime.UtcNow
-        });
-
-        var updated = await _repository.UpdateAsync(id, task)
-            ?? throw new NotFoundException($"Task with id '{id}' was not found.");
-
-        return MapToDto(updated);
-    }
-
-    private async Task EnsureUserExistsAsync(Guid userId, string errorMessage)
-    {
-        if (!await _repository.UserExistsAsync(userId))
-        {
-            throw new ValidationException(errorMessage);
-        }
     }
 
     private static bool IsPriorityValid(string? priority)
     {
-        return !string.IsNullOrWhiteSpace(priority) && AllowedPriorities.Contains(priority);
+        return !string.IsNullOrWhiteSpace(priority) && TaskPriorities.Allowed.Contains(priority);
     }
 
     private static string NormalizePriority(string priority)
     {
         return priority.Trim().ToLowerInvariant() switch
         {
-            "low" => "Low",
-            "medium" => "Medium",
-            "high" => "High",
+            "low" => TaskPriorities.Low,
+            "medium" => TaskPriorities.Medium,
+            "high" => TaskPriorities.High,
             _ => priority
         };
     }
@@ -269,6 +274,14 @@ public class TaskService : ITaskService
         }
     }
 
+    private static void EnsureStatus(UserTask task, string requiredStatus, string errorMessage)
+    {
+        if (!task.Status.Equals(requiredStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new BusinessRuleException(errorMessage);
+        }
+    }
+
     private static TaskResponseDto MapToDto(UserTask task) => new()
     {
         Id = task.Id,
@@ -281,5 +294,15 @@ public class TaskService : ITaskService
         DueDate = task.DueDate,
         CreatedAt = task.CreatedAt,
         UpdatedAt = task.UpdatedAt
+    };
+
+    private static ApprovalLogResponseDto MapApprovalLogToDto(ApprovalLog log) => new()
+    {
+        Id = log.Id,
+        TaskId = log.TaskId,
+        ReviewedBy = log.ReviewedBy,
+        Action = log.Action,
+        Note = log.Note,
+        CreatedAt = log.CreatedAt
     };
 }

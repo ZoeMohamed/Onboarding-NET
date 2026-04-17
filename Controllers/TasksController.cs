@@ -33,6 +33,13 @@ public class TasksController : ControllerBase
         return Ok(ApiResponseFactory.Success(task, "Task fetched successfully"));
     }
 
+    [HttpGet("{id}/approvals")]
+    public async Task<IActionResult> GetApprovalLogs(Guid id)
+    {
+        var logs = await _service.GetApprovalLogsAsync(id);
+        return Ok(ApiResponseFactory.Success(logs, "Approval logs fetched successfully"));
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateTaskDto dto)
     {

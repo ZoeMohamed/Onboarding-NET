@@ -6,6 +6,7 @@ public interface ITaskService
 {
     Task<List<TaskResponseDto>> GetAllAsync();
     Task<TaskResponseDto> GetByIdAsync(Guid id);
+    Task<List<ApprovalLogResponseDto>> GetApprovalLogsAsync(Guid taskId);
     Task<TaskResponseDto> CreateAsync(CreateTaskDto dto, Guid userId);
     Task<TaskResponseDto> UpdateAsync(Guid id, UpdateTaskDto dto);
     Task DeleteAsync(Guid id);

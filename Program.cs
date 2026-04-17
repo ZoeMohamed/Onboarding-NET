@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using TaskManagement.API.Common.Constants;
 using TaskManagement.API.Common;
 using TaskManagement.API.Data;
 using TaskManagement.API.Middlewares;
@@ -88,7 +89,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("CanReviewTask", policy =>
-        policy.RequireRole("Admin", "Manager"));
+        policy.RequireRole(UserRoles.Admin, UserRoles.Manager));
 });
 
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -111,7 +112,7 @@ using (var scope = app.Services.CreateScope())
         "user",
         "user@local.dev",
         "User@123!",
-        "User");
+        UserRoles.User);
 
     SeedUser(
         dbContext,
@@ -119,7 +120,15 @@ using (var scope = app.Services.CreateScope())
         "admin",
         "admin@local.dev",
         "Admin@123!",
-        "Admin");
+        UserRoles.Admin);
+
+    SeedUser(
+        dbContext,
+        Guid.Parse("33333333-3333-3333-3333-333333333333"),
+        "manager",
+        "manager@local.dev",
+        "Manager@123!",
+        UserRoles.Manager);
 }
 
 if (app.Environment.IsDevelopment())

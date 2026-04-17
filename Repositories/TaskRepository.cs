@@ -78,4 +78,12 @@ public class TaskRepository : ITaskRepository
         await _context.SaveChangesAsync();
         return log;
     }
+
+    public async Task<List<ApprovalLog>> GetApprovalLogsByTaskIdAsync(Guid taskId)
+    {
+        return await _context.ApprovalLogs
+            .Where(log => log.TaskId == taskId)
+            .OrderByDescending(log => log.CreatedAt)
+            .ToListAsync();
+    }
 }

@@ -52,3 +52,13 @@ public class TaskResponseDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
+
+public class ApprovalLogResponseDto
+{
+    public Guid Id { get; set; }
+    public Guid TaskId { get; set; }
+    public Guid ReviewedBy { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string? Note { get; set; }
+    public DateTime CreatedAt { get; set; }
+}

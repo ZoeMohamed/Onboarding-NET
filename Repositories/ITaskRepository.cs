@@ -11,4 +11,5 @@ public interface ITaskRepository
     Task<bool> DeleteAsync(Guid id);
     Task<bool> UserExistsAsync(Guid userId);
     Task<ApprovalLog> AddApprovalLogAsync(ApprovalLog log);
+    Task<List<ApprovalLog>> GetApprovalLogsByTaskIdAsync(Guid taskId);
 }
